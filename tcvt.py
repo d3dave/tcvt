@@ -560,6 +560,8 @@ class Terminal:
             ord('\n'): self.do_ind,
             ord('\r'): self.do_cr,
             ord('\t'): self.do_ht,
+            0x0e: self.do_smacs,
+            0x0f: self.do_rmacs,
             }.get(char)
         if func:
             func()
@@ -574,14 +576,27 @@ class Terminal:
             raise ValueError("feed %r" % char)
 
     def feed_graphics(self, char):
-        if char == 0x1b:
-            self.mode = (self.feed_esc,)
-        elif char in self.graphics_chars:
+        if char in self.graphics_chars:
             self.addch(self.graphics_chars[char])
         elif char == ord(b'q'):  # some applications appear to use VT100 names?
             self.addch(curses.ACS_HLINE)
         else:
-            raise ValueError("graphics %r" % char)
+            self.feed_simple(char)  # controls, escapes and text work as usual
+
+    def do_smacs(self):
+        self.graphics_font = True
+        self.feed_reset()
+
+    def do_rmacs(self):
+        self.graphics_font = False
+        self.feed_reset()
+
+    def feed_charset(self, char, gset):
+        # ESC ( X designates G0, the set in use; ESC ) X designates G1.
+        # ponytail: G1 assumed to be line drawing, SO/SI just toggle graphics.
+        if gset == ord(b'('):
+            self.graphics_font = char == ord(b'0')
+        self.feed_reset()
 
     def do_sc(self):
         self.saved = self.screen.getyx()
@@ -606,6 +621,8 @@ class Terminal:
             self.mode = (self.feed_string, False)
         elif char in bytearray(b'=>'):  # keypad modes
             self.feed_reset()
+        elif char in bytearray(b'()'):
+            self.mode = (self.feed_charset, char)
         else:
             raise ValueError("feed esc %r" % char)
 
@@ -674,11 +691,9 @@ class Terminal:
         elif code == 7:
             self.screen.attron(curses.A_REVERSE)
         elif code == 10:
-            self.graphics_font = False
-            self.feed_reset()
+            self.do_rmacs()
         elif code == 11:
-            self.graphics_font = True
-            self.feed_reset()
+            self.do_smacs()
         elif 30 <= code <= 37:
             self.fg = code - 30
             self.set_color()
