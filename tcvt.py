@@ -607,6 +607,24 @@ class Terminal:
         if 1 <= top < bottom <= rows:  # otherwise ignored, as the spec says
             self.region = None if (top, bottom) == (1, rows) else (top - 1, bottom - 1)
 
+    def scroll_region(self, n):
+        """Scroll the region (or screen) up n lines, down for negative n; cursor kept."""
+        rows, _ = self.screen.getmaxyx()
+        top, bottom = self.region or (0, rows - 1)
+        y, x = self.screen.getyx()
+        for _ in range(abs(n)):  # delete at one margin, insert at the other
+            self.screen.move(top if n > 0 else bottom, 0)
+            self.screen.deleteln()
+            self.screen.move(bottom if n > 0 else top, 0)
+            self.screen.insertln()
+        self.screen.move(y, x)
+
+    def do_indn(self, n):
+        self.scroll_region(n or 1)
+
+    def do_rin(self, n):
+        self.scroll_region(-(n or 1))
+
     def do_sc(self):
         self.saved = self.screen.getyx()
 
@@ -661,6 +679,8 @@ class Terminal:
             func()
         elif char == ord(b'm'):
             self.feed_esc_opbr_next(char, bytearray(b'0'))
+        elif char in bytearray(b'ST'):
+            self.feed_esc_opbr_next(char, bytearray(b'1'))
         elif char in bytearray(b'0123456789'):
             self.mode = (self.feed_esc_opbr_next, bytearray((char,)))
         elif char in bytearray(b'?>=<'):
@@ -733,6 +753,8 @@ class Terminal:
             ord('P'): self.do_dch,
             ord('X'): self.do_ech,
             ord('@'): self.do_ich,
+            ord('S'): self.do_indn,
+            ord('T'): self.do_rin,
             }.get(char)
         if func and prev.isdigit():
             func(int(prev))
