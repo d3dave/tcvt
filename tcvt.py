@@ -49,11 +49,9 @@ def init_color_pairs(invert):
     Set color pairs for ncurses where each color is between 0 and COLORS.
     """
     foreground = curses.COLOR_BLACK
-    background = curses.COLOR_WHITE
     if invert:
-        background = curses.COLOR_BLACK
         foreground = curses.COLOR_WHITE
-    backgrounds = (background, curses.COLOR_RED,
+    backgrounds = (-1, curses.COLOR_RED,  # -1: the terminal's own background
                    curses.COLOR_GREEN, curses.COLOR_YELLOW,
                    curses.COLOR_BLUE, curses.COLOR_MAGENTA,
                    curses.COLOR_CYAN, foreground)
@@ -433,8 +431,10 @@ class Terminal:
         """Color pair for fg/bg outside the fixed table, allocated on first use."""
         if fg < 16 and not has_bright():
             fg %= 8
-        if bg in (0, 7) and not self.invert:
-            bg = 7 - bg  # the fixed table shows black backgrounds as white and vice versa
+        if bg == 0:
+            bg = -1  # the terminal's own background, as in the fixed table
+        elif bg == 7:
+            bg = curses.COLOR_WHITE if self.invert else curses.COLOR_BLACK  # as in the fixed table
         key = (fg, bg)
         if key not in self.pairs:
             pair = 128 + len(self.pairs)
