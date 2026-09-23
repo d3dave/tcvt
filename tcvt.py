@@ -819,7 +819,6 @@ def main():
     pid, masterfd = pty.fork()
     if pid == 0: # child
         os.close(errpiper)
-        os.environ["TERM"] = "ansi"
         try:
             if len(args) < 1:
                 os.execvp(os.environ["SHELL"], [os.environ["SHELL"]])
