@@ -410,6 +410,9 @@ class Terminal:
     def do_dim(self):
         self.screen.attron(curses.A_DIM)
 
+    def do_sitm(self):
+        self.screen.attron(curses.A_ITALIC)
+
     def set_color(self):
         self.screen.attroff(curses.A_COLOR)  # attron() would OR the pairs
         if self.fg < 16 and self.bg < 16:
@@ -699,12 +702,14 @@ class Terminal:
         func = {
             1: self.do_bold,
             2: self.do_dim,
+            3: self.do_sitm,
             4: self.do_smul,
             5: self.do_blink,
             8: self.do_invis,
             }.get(code)
         off = {
             22: curses.A_BOLD | curses.A_DIM,
+            23: curses.A_ITALIC,
             24: curses.A_UNDERLINE,
             25: curses.A_BLINK,
             27: curses.A_REVERSE,
