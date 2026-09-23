@@ -604,6 +604,8 @@ class Terminal:
             self.mode = (self.feed_esc_opbr_next, bytearray((char,)))
         elif char in bytearray(b'?>=<'):
             self.mode = (self.feed_esc_private,)
+        elif char == ord(b'r'):
+            pass  # DECSTBM reset to full screen: already the only region
         else:
             raise ValueError("feed esc [ %r" % char)
 
