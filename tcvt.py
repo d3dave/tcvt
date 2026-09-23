@@ -343,6 +343,7 @@ class Terminal:
         self.graphics_font = False
         self.graphics_chars = acsc # really initialized after
         self.lastchar = ord(b' ')
+        self.saved = (0, 0)  # ponytail: DECSC/DECRC keep the cursor only, not SGR
         self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
         self.columns = columns
         self.reverse = reverse
@@ -547,11 +548,24 @@ class Terminal:
         else:
             raise ValueError("graphics %r" % char)
 
+    def do_sc(self):
+        self.saved = self.screen.getyx()
+
+    def do_rc(self):
+        self.screen.move(*self.saved)
+
     def do_da1(self):
         os.write(self.masterfd, b'\x1b[?6c')  # "I am a VT102"; fish 4 waits for this
 
     def feed_esc(self, char):
-        if char == ord(b'['):
+        func = {
+            ord('7'): self.do_sc,
+            ord('8'): self.do_rc,
+            }.get(char)
+        if func:
+            self.feed_reset()
+            func()
+        elif char == ord(b'['):
             self.mode = (self.feed_esc_opbr,)
         elif char in bytearray(b']P'):
             self.mode = (self.feed_string, False)
