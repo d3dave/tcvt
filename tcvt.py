@@ -41,6 +41,8 @@ import curses
 import errno
 import time
 import optparse
+import codecs
+import locale
 
 def init_color_pairs(invert):
     """
@@ -175,8 +177,12 @@ class Columns:
         self.move(self.ypos + yoff, self.xpos + xoff)
 
     def addch(self, char):
+        # ponytail: one cell per char; East Asian wide / combining chars drift xpos
         if self.xpos == self.columnwidth - 1:
-            self.curwin.insch(self.curypos, self.curxpos, char, self.attrs)
+            if isinstance(char, str):  # insch() cannot take a wide char
+                self.curwin.insstr(self.curypos, self.curxpos, char, self.attrs)
+            else:
+                self.curwin.insch(self.curypos, self.curxpos, char, self.attrs)
             if self.ypos + 1 == 2 * self.height:
                 self.scroll()
                 self.move(self.ypos, 0)
@@ -310,8 +316,7 @@ def compose_dicts(dct1, dct2):
 
 SIMPLE_CHARACTERS = bytearray(
     b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' +
-    b'0123456789@:~$ .#!/_(),[]=-+*\'"|<>%&\\?;`^{}' +
-    b'\xb4\xb6\xb7\xc3\xc4\xd6\xdc\xe4\xe9\xfc\xf6')
+    b'0123456789@:~$ .#!/_(),[]=-+*\'"|<>%&\\?;`^{}')
 
 class Terminal:
     def __init__(self, acsc, columns, reverse=False, invert=False):
@@ -323,6 +328,7 @@ class Terminal:
         self.graphics_font = False
         self.graphics_chars = acsc # really initialized after
         self.lastchar = ord(b' ')
+        self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
         self.columns = columns
         self.reverse = reverse
         self.invert = invert
@@ -503,6 +509,9 @@ class Terminal:
             self.addch(char)
         elif char == 0x1b:
             self.mode = (self.feed_esc,)
+        elif char >= 0x80:
+            for c in self.utf8.decode(bytes((char,))):
+                self.addch(c)
         else:
             raise ValueError("feed %r" % char)
 
@@ -687,6 +696,7 @@ def set_cloexec(fd):
     fcntl.fcntl(fd, fcntl.F_SETFD, flags)
 
 def main():
+    locale.setlocale(locale.LC_ALL, '')  # curses needs it for wide chars
     # Options
     parser = optparse.OptionParser()
     parser.disable_interspersed_args()
