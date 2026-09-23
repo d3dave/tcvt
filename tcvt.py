@@ -344,6 +344,8 @@ class Terminal:
         self.graphics_chars = acsc # really initialized after
         self.lastchar = ord(b' ')
         self.saved = (0, 0)  # ponytail: DECSC/DECRC keep the cursor only, not SGR
+        self.colors = {}  # (r, g, b) -> curses color slot 16..COLORS-1
+        self.pairs = {}  # (fg, bg) -> color pair 128..255 for colors outside the table
         self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
         self.columns = columns
         self.reverse = reverse
@@ -407,7 +409,37 @@ class Terminal:
 
     def set_color(self):
         self.screen.attroff(curses.A_COLOR)  # attron() would OR the pairs
-        self.screen.attron(get_color(self.fg, self.bg))
+        if self.fg < 16 and self.bg < 16:
+            self.screen.attron(get_color(self.fg, self.bg))
+        else:
+            self.screen.attron(self.dynamic_pair(self.fg, self.bg))
+
+    def true_color(self, red, green, blue):
+        """Curses color for an RGB triple; palette slots 16+ are redefined on first use."""
+        key = (red, green, blue)
+        if key not in self.colors:
+            slot = 16 + len(self.colors)
+            if not curses.can_change_color() or slot >= curses.COLORS:
+                return None  # ponytail: no palette access or out of slots, keep the color
+            curses.init_color(slot, red * 1000 // 255, green * 1000 // 255,
+                              blue * 1000 // 255)
+            self.colors[key] = slot
+        return self.colors[key]
+
+    def dynamic_pair(self, fg, bg):
+        """Color pair for fg/bg outside the fixed table, allocated on first use."""
+        if fg < 16 and not has_bright():
+            fg %= 8
+        if bg in (0, 7) and not self.invert:
+            bg = 7 - bg  # the fixed table shows black backgrounds as white and vice versa
+        key = (fg, bg)
+        if key not in self.pairs:
+            pair = 128 + len(self.pairs)
+            if pair >= min(curses.COLOR_PAIRS, 256):  # attron() carries 8 pair bits
+                return 0  # ponytail: out of pairs, default colors
+            curses.init_pair(pair, fg, bg)
+            self.pairs[key] = pair
+        return curses.color_pair(self.pairs[key])
 
     def do_cr(self):
         self.screen.relmove(0, -9999)
@@ -683,15 +715,19 @@ class Terminal:
             parts = [int(p) for p in prev.split(b';')]
             while parts:
                 code = parts.pop(0)
-                if code in (38, 48):
-                    # ponytail: 256/24-bit color: ANSI 0-15 mapped, rest ignored
+                if code in (38, 48):  # 38;5;n / 38;2;r;g;b
                     sub = parts[:2] if parts[:1] == [5] else parts[:4]
                     del parts[:len(sub)]
-                    if sub[:1] == [5] and len(sub) == 2 and sub[1] < 16:
+                    color = None
+                    if sub[:1] == [5] and len(sub) == 2 and sub[1] < max(curses.COLORS, 16):
+                        color = sub[1]
+                    elif sub[:1] == [2] and len(sub) == 4:
+                        color = self.true_color(*sub[1:])
+                    if color is not None:
                         if code == 38:
-                            self.fg = sub[1]
+                            self.fg = color
                         else:
-                            self.bg = sub[1] % 8
+                            self.bg = color if color >= 16 else color % 8
                         self.set_color()
                 else:
                     self.feed_color(code)
