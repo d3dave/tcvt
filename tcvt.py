@@ -38,7 +38,7 @@ import fcntl
 import termios
 import struct
 import curses
-import errno
+import signal
 import time
 import optparse
 import codecs
@@ -357,7 +357,7 @@ class Terminal:
         self.screen.refresh()
 
     def resized(self):
-        # The refresh call causes curses to notice the new dimensions.
+        # main() has already called curses.resize_term() with the new size.
         self.realscreen.refresh()
         self.realscreen.clear()
         try:
@@ -838,23 +838,32 @@ def main():
         print(data)
         sys.exit(1)
 
+    # Self-pipe: SIGWINCH only wakes the select loop, the resize happens there.
+    winchr, winchw = os.pipe()
+    os.set_blocking(winchw, False)
+    def on_winch(_signum, _frame):
+        try:
+            os.write(winchw, b'w')
+        except BlockingIOError:
+            pass  # a wake-up is already pending
+
     # Begin multicolumn layout
     try:
         t.masterfd = masterfd
         t.start()
+        signal.signal(signal.SIGWINCH, on_winch)  # replaces the ncurses handler
         t.resizepty(masterfd)
         refreshpending = None
         while True:
-            try:
-                res, _, _ = select.select([0, masterfd], [], [],
-                                          refreshpending and 0)
-            except select.error as err:
-                if err.args[0] == errno.EINTR:
-                    t.resized()
-                    t.resizepty(masterfd)
-                    continue
-                raise
-            if 0 in res:
+            res, _, _ = select.select([0, masterfd, winchr], [], [],
+                                      refreshpending and 0)
+            if winchr in res:
+                os.read(winchr, 1024)  # coalesce queued resizes
+                size = os.get_terminal_size(0)
+                curses.resize_term(size.lines, size.columns)
+                t.resized()
+                t.resizepty(masterfd)
+            elif 0 in res:
                 while True:
                     key = t.realscreen.getch()
                     if key == -1:
