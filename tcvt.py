@@ -316,6 +316,7 @@ SIMPLE_CHARACTERS = bytearray(
 class Terminal:
     def __init__(self, acsc, columns, reverse=False, invert=False):
         self.mode = (self.feed_simple,)
+        self.masterfd = None  # set by main; used to answer terminal queries
         self.realscreen = None
         self.screen = None
         self.fg = self.bg = 0
@@ -515,11 +516,25 @@ class Terminal:
         else:
             raise ValueError("graphics %r" % char)
 
+    def do_da1(self):
+        os.write(self.masterfd, b'\x1b[?6c')  # "I am a VT102"; fish 4 waits for this
+
     def feed_esc(self, char):
         if char == ord(b'['):
             self.mode = (self.feed_esc_opbr,)
+        elif char in bytearray(b']P'):
+            self.mode = (self.feed_string, False)
+        elif char in bytearray(b'=>'):  # keypad modes
+            self.feed_reset()
         else:
             raise ValueError("feed esc %r" % char)
+
+    def feed_string(self, char, esc):
+        # ponytail: OSC/DCS (fish 4 terminal probes) swallowed until BEL or ESC \
+        if char == 0x07 or (esc and char == ord(b'\\')):
+            self.feed_reset()
+        else:
+            self.mode = (self.feed_string, char == 0x1b)
 
     def feed_esc_opbr(self, char):
         self.feed_reset()
@@ -534,6 +549,7 @@ class Terminal:
             ord('M'): self.do_dl1,
             ord('K'): self.do_el,
             ord('P'): self.do_dch1,
+            ord('c'): self.do_da1,
             }.get(char)
         if func:
             func()
@@ -541,8 +557,15 @@ class Terminal:
             self.feed_esc_opbr_next(char, bytearray(b'0'))
         elif char in bytearray(b'0123456789'):
             self.mode = (self.feed_esc_opbr_next, bytearray((char,)))
+        elif char in bytearray(b'?>=<'):
+            self.mode = (self.feed_esc_private,)
         else:
             raise ValueError("feed esc [ %r" % char)
+
+    def feed_esc_private(self, char):
+        # ponytail: DEC private modes and xterm queries (ESC [ ? 1049 h, ESC [ > 0 q) ignored
+        if char not in bytearray(b'0123456789;'):
+            self.feed_reset()
 
     def feed_color(self, code):
         func = {
@@ -617,6 +640,10 @@ class Terminal:
             self.do_hpa(int(prev) - 1)
         elif char == ord(b'K') and prev == b'1':
             self.do_el1()
+        elif char == ord(b'c'):
+            self.do_da1()
+        elif char == ord(b'n'):
+            pass  # cursor position query, unanswered
         else:
             raise ValueError("feed esc [ %r %r" % (prev, char))
 
@@ -702,6 +729,7 @@ def main():
 
     # Begin multicolumn layout
     try:
+        t.masterfd = masterfd
         t.start()
         t.resizepty(masterfd)
         refreshpending = None
