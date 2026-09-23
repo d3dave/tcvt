@@ -342,6 +342,7 @@ class Terminal:
         self.graphics_chars = acsc # really initialized after
         self.lastchar = ord(b' ')
         self.saved = (0, 0)  # ponytail: DECSC/DECRC keep the cursor only, not SGR
+        self.region = None  # DECSTBM scrolling region (top, bottom), 0-based; None: whole screen
         self.colors = {}  # (r, g, b) -> curses color slot 16..COLORS-1
         self.pairs = {}  # (fg, bg) -> color pair 128..255 for colors outside the table
         self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
@@ -360,6 +361,7 @@ class Terminal:
         # main() has already called curses.resize_term() with the new size.
         self.realscreen.refresh()
         self.realscreen.clear()
+        self.region = None
         try:
             self.screen = Columns(self.realscreen, self.columns,
                                   reverse=self.reverse)
@@ -598,6 +600,13 @@ class Terminal:
             self.graphics_font = char == ord(b'0')
         self.feed_reset()
 
+    def do_csr(self, top, bottom):
+        """Set the scrolling region from 1-based margins, 0 meaning the default."""
+        rows, _ = self.screen.getmaxyx()
+        top, bottom = top or 1, bottom or rows
+        if 1 <= top < bottom <= rows:  # otherwise ignored, as the spec says
+            self.region = None if (top, bottom) == (1, rows) else (top - 1, bottom - 1)
+
     def do_sc(self):
         self.saved = self.screen.getyx()
 
@@ -657,7 +666,7 @@ class Terminal:
         elif char in bytearray(b'?>=<'):
             self.mode = (self.feed_esc_private,)
         elif char == ord(b'r'):
-            pass  # DECSTBM reset to full screen: already the only region
+            self.do_csr(0, 0)
         else:
             raise ValueError("feed esc [ %r" % char)
 
@@ -770,6 +779,9 @@ class Terminal:
             self.do_da1()
         elif char == ord(b'n'):
             pass  # cursor position query, unanswered
+        elif char == ord(b'r'):
+            parts = [int(p or b'0') for p in prev.split(b';')] + [0]
+            self.do_csr(parts[0], parts[1])
         else:
             raise ValueError("feed esc [ %r %r" % (prev, char))
 
