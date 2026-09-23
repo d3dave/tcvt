@@ -391,6 +391,9 @@ class Terminal:
         self.graphics_chars = compose_dicts(self.graphics_chars, acs_map())
 
     def stop(self):
+        if self.colors:  # ncurses does not always reset the palette itself
+            sys.stdout.write("\x1b]104\x07")
+            sys.stdout.flush()
         curses.noraw()
         curses.echo()
         curses.endwin()
