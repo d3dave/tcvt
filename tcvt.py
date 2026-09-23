@@ -53,19 +53,28 @@ def init_color_pairs(invert):
     if invert:
         background = curses.COLOR_BLACK
         foreground = curses.COLOR_WHITE
-    for bi, bc in enumerate((background, curses.COLOR_RED,
-                             curses.COLOR_GREEN, curses.COLOR_YELLOW,
-                             curses.COLOR_BLUE, curses.COLOR_MAGENTA,
-                             curses.COLOR_CYAN, foreground)):
-        for fi, fc in enumerate((curses.COLOR_WHITE, curses.COLOR_BLACK,
-                                 curses.COLOR_RED, curses.COLOR_GREEN,
-                                 curses.COLOR_YELLOW, curses.COLOR_BLUE,
-                                 curses.COLOR_MAGENTA, curses.COLOR_CYAN)):
+    backgrounds = (background, curses.COLOR_RED,
+                   curses.COLOR_GREEN, curses.COLOR_YELLOW,
+                   curses.COLOR_BLUE, curses.COLOR_MAGENTA,
+                   curses.COLOR_CYAN, foreground)
+    foregrounds = (curses.COLOR_WHITE, curses.COLOR_BLACK,
+                   curses.COLOR_RED, curses.COLOR_GREEN,
+                   curses.COLOR_YELLOW, curses.COLOR_BLUE,
+                   curses.COLOR_MAGENTA, curses.COLOR_CYAN)
+    for bi, bc in enumerate(backgrounds):
+        for fi, fc in enumerate(foregrounds):
             if fi != 0 or bi != 0:
                 curses.init_pair(fi*8+bi, fc, bc)
+            if has_bright():  # pairs 64..127: bright (8..15) foregrounds
+                curses.init_pair(64+fi*8+bi, fc+8, bc)
+
+def has_bright():
+    return curses.COLORS >= 16 and curses.COLOR_PAIRS >= 128
 
 def get_color(fg=1, bg=0):
-    return curses.color_pair(((fg + 1) % 8) * 8 + bg)
+    """fg 0-15 (8-15 bright, plain if unsupported), bg 0-7."""
+    bright = 64 if fg >= 8 and has_bright() else 0
+    return curses.color_pair(((fg % 8 + 1) % 8) * 8 + bg + bright)
 
 class Simple:
     def __init__(self, curseswindow):
@@ -100,6 +109,9 @@ class Simple:
 
     def attron(self, attr):
         self.screen.attron(attr)
+
+    def attroff(self, attr):
+        self.screen.attroff(attr)
 
     def clrtoeol(self):
         self.screen.clrtoeol()
@@ -240,6 +252,9 @@ class Columns:
 
     def attron(self, attr):
         self.attrs |= attr
+
+    def attroff(self, attr):
+        self.attrs &= ~attr
 
     def clrtoeol(self):
         self.curwin.clrtoeol()
@@ -385,6 +400,13 @@ class Terminal:
 
     def do_bold(self):
         self.screen.attron(curses.A_BOLD)
+
+    def do_dim(self):
+        self.screen.attron(curses.A_DIM)
+
+    def set_color(self):
+        self.screen.attroff(curses.A_COLOR)  # attron() would OR the pairs
+        self.screen.attron(get_color(self.fg, self.bg))
 
     def do_cr(self):
         self.screen.relmove(0, -9999)
@@ -579,12 +601,22 @@ class Terminal:
     def feed_color(self, code):
         func = {
             1: self.do_bold,
+            2: self.do_dim,
             4: self.do_smul,
             5: self.do_blink,
             8: self.do_invis,
             }.get(code)
+        off = {
+            22: curses.A_BOLD | curses.A_DIM,
+            24: curses.A_UNDERLINE,
+            25: curses.A_BLINK,
+            27: curses.A_REVERSE,
+            28: curses.A_INVIS,
+            }.get(code)
         if func:
             func()
+        elif off:
+            self.screen.attroff(off)
         elif code == 0:
             self.fg = self.bg = 0
             self.screen.attrset(0)
@@ -598,16 +630,19 @@ class Terminal:
             self.feed_reset()
         elif 30 <= code <= 37:
             self.fg = code - 30
-            self.screen.attron(get_color(self.fg, self.bg))
+            self.set_color()
+        elif 90 <= code <= 97:
+            self.fg = code - 90 + 8
+            self.set_color()
         elif code == 39:
             self.fg = 7
-            self.screen.attron(get_color(self.fg, self.bg))
-        elif 40 <= code <= 47:
-            self.bg = code - 40
-            self.screen.attron(get_color(self.fg, self.bg))
+            self.set_color()
+        elif 40 <= code <= 47 or 100 <= code <= 107:
+            self.bg = code % 10  # ponytail: bright backgrounds shown as normal
+            self.set_color()
         elif code == 49:
             self.bg = 0
-            self.screen.attron(get_color(self.fg, self.bg))
+            self.set_color()
         else:
             raise ValueError("feed esc [ %r m" % code)
 
@@ -629,9 +664,21 @@ class Terminal:
         elif char in bytearray(b'0123456789;'):
             self.mode = (self.feed_esc_opbr_next, prev + bytearray((char,)))
         elif char == ord(b'm'):
-            parts = prev.split(b';')
-            for p in parts:
-                self.feed_color(int(p))
+            parts = [int(p) for p in prev.split(b';')]
+            while parts:
+                code = parts.pop(0)
+                if code in (38, 48):
+                    # ponytail: 256/24-bit color: ANSI 0-15 mapped, rest ignored
+                    sub = parts[:2] if parts[:1] == [5] else parts[:4]
+                    del parts[:len(sub)]
+                    if sub[:1] == [5] and len(sub) == 2 and sub[1] < 16:
+                        if code == 38:
+                            self.fg = sub[1]
+                        else:
+                            self.bg = sub[1] % 8
+                        self.set_color()
+                else:
+                    self.feed_color(code)
         elif char == ord(b'H'):
             parts = prev.split(b';')
             if len(parts) != 2:
