@@ -327,7 +327,7 @@ def compose_dicts(dct1, dct2):
             pass
     return result
 
-SIMPLE_CHARACTERS = bytearray(
+SIMPLE_CHARACTERS = (
     b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' +
     b'0123456789@:~$ .#!/_(),[]=-+*\'"|<>%&\\?;`^{}')
 
@@ -653,11 +653,11 @@ class Terminal:
             func()
         elif char == ord(b'['):
             self.mode = (self.feed_esc_opbr,)
-        elif char in bytearray(b']P'):
+        elif char in b']P':
             self.mode = (self.feed_string, False)
-        elif char in bytearray(b'=>'):  # keypad modes
+        elif char in b'=>':  # keypad modes
             self.feed_reset()
-        elif char in bytearray(b'()'):
+        elif char in b'()':
             self.mode = (self.feed_charset, char)
         else:
             raise ValueError("feed esc %r" % char)
@@ -687,12 +687,12 @@ class Terminal:
         if func:
             func()
         elif char == ord(b'm'):
-            self.feed_esc_opbr_next(char, bytearray(b'0'))
-        elif char in bytearray(b'ST'):
-            self.feed_esc_opbr_next(char, bytearray(b'1'))
-        elif char in bytearray(b'0123456789'):
-            self.mode = (self.feed_esc_opbr_next, bytearray((char,)))
-        elif char in bytearray(b'?>=<'):
+            self.feed_esc_opbr_next(char, b'0')
+        elif char in b'ST':
+            self.feed_esc_opbr_next(char, b'1')
+        elif char in b'0123456789':
+            self.mode = (self.feed_esc_opbr_next, bytes((char,)))
+        elif char in b'?>=<':
             self.mode = (self.feed_esc_private,)
         elif char == ord(b'r'):
             self.do_csr(0, 0)
@@ -701,7 +701,7 @@ class Terminal:
 
     def feed_esc_private(self, char):
         # ponytail: DEC private modes and xterm queries (ESC [ ? 1049 h, ESC [ > 0 q) ignored
-        if char not in bytearray(b'0123456789;'):
+        if char not in b'0123456789;':
             self.feed_reset()
 
     def feed_color(self, code):
@@ -769,8 +769,8 @@ class Terminal:
             }.get(char)
         if func and prev.isdigit():
             func(int(prev))
-        elif char in bytearray(b'0123456789;'):
-            self.mode = (self.feed_esc_opbr_next, prev + bytearray((char,)))
+        elif char in b'0123456789;':
+            self.mode = (self.feed_esc_opbr_next, prev + bytes((char,)))
         elif char == ord(b'm'):
             parts = [int(p) for p in prev.split(b';')]
             while parts:
@@ -796,12 +796,12 @@ class Terminal:
             if len(parts) != 2:
                 raise ValueError("feed esc [ %r H" % parts)
             self.screen.move(*map((-1).__add__, map(int, parts)))
-        elif prev == bytearray(b'2') and char == ord(b'J'):
+        elif prev == b'2' and char == ord(b'J'):
             self.screen.move(0, 0)
             self.screen.clrtobot()
-        elif prev == bytearray(b'3') and char == ord(b'J'):
+        elif prev == b'3' and char == ord(b'J'):
             pass  # erase the scrollback: there is none
-        elif prev == bytearray(b'0') and char == ord(b'J'):
+        elif prev == b'0' and char == ord(b'J'):
             self.do_ed()
         elif char == ord(b'd') and prev.isdigit():
             self.do_vpa(int(prev) - 1)
@@ -855,7 +855,6 @@ def compute_keymap(symbolic_map):
     for key, value in symbolic_map.items():
         keymap[key] = (curses.tigetstr(value) or b"").replace(b"\\E", b"\x1b")
     acsc = curses.tigetstr("acsc")
-    acsc = bytearray(acsc)
     acsc = dict(zip(acsc[1::2], acsc[::2]))
     curses.setupterm(oldterm)
     return keymap, acsc
@@ -953,7 +952,7 @@ def main():
                     break
                 if not data:
                     break
-                for char in bytearray(data):
+                for char in data:
                     if "TCVT_DEVEL" in os.environ:
                         t.feed(char)
                     else:
