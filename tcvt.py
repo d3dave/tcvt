@@ -823,7 +823,7 @@ SYMBOLIC_KEYMAPPING = {
 
 def compute_keymap(symbolic_map):
     oldterm = os.environ["TERM"]
-    curses.setupterm("ansi")
+    curses.setupterm("xterm-256color")
     keymap = {}
     for key, value in symbolic_map.items():
         keymap[key] = (curses.tigetstr(value) or b"").replace(b"\\E", b"\x1b")
