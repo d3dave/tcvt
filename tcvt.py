@@ -664,6 +664,10 @@ class Terminal:
     def do_rc(self):
         self.screen.move(*self.saved)
 
+    def do_cpr(self):
+        y, x = self.screen.getyx()
+        os.write(self.masterfd, b'\x1b[%d;%dR' % (y + 1, x + 1))
+
     def do_da1(self):
         os.write(self.masterfd, b'\x1b[?6c')  # "I am a VT102"; fish 4 waits for this
 
@@ -849,8 +853,10 @@ class Terminal:
             self.do_el()
         elif char == ord(b'c'):
             self.do_da1()
+        elif char == ord(b'n') and prev == b'6':
+            self.do_cpr()
         elif char == ord(b'n'):
-            pass  # cursor position query, unanswered
+            pass  # other status queries, unanswered
         elif char == ord(b'r'):
             parts = [int(p or b'0') for p in prev.split(b';')] + [0]
             self.do_csr(parts[0], parts[1])
