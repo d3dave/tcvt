@@ -466,7 +466,10 @@ class Terminal:
         self.do_cub(1)
 
     def do_cud(self, n):
-        self.screen.relmove(n, 0)
+        y, x = self.screen.getyx()
+        rows, _ = self.screen.getmaxyx()
+        bottom = self.region[1] if self.region and y <= self.region[1] else rows - 1
+        self.screen.move(min(y + n, bottom), x)  # stops at the margin when inside the region
 
     def do_cud1(self):
         self.do_cud(1)
@@ -478,7 +481,9 @@ class Terminal:
         self.do_cuf(1)
 
     def do_cuu(self, n):
-        self.screen.relmove(-n, 0)
+        y, x = self.screen.getyx()
+        top = self.region[0] if self.region and y >= self.region[0] else 0
+        self.screen.move(max(y - n, top), x)
 
     def do_cuu1(self):
         self.do_cuu(1)
@@ -498,8 +503,11 @@ class Terminal:
         self.do_dl(1)
 
     def do_ech(self, n):
-        for _ in range(n):
+        y, x = self.screen.getyx()
+        _, cols = self.screen.getmaxyx()
+        for _ in range(min(n or 1, cols - x)):
             self.screen.addch(ord(b' '))
+        self.screen.move(y, x)  # erase does not move the cursor
 
     def do_ed(self):
         self.screen.clrtobot()
@@ -636,6 +644,7 @@ class Terminal:
         top, bottom = top or 1, bottom or rows
         if 1 <= top < bottom <= rows:  # otherwise ignored, as the spec says
             self.region = None if (top, bottom) == (1, rows) else (top - 1, bottom - 1)
+            self.screen.move(0, 0)
 
     def scroll_region(self, n):
         """Scroll the region (or screen) up n lines, down for negative n; cursor kept."""
@@ -744,7 +753,7 @@ class Terminal:
             func()
         elif char == ord(b'm'):
             self.feed_esc_opbr_next(char, b'0')
-        elif char in b'ST':
+        elif char in b'STX':
             self.feed_esc_opbr_next(char, b'1')
         elif char in b'0123456789':
             self.mode = (self.feed_esc_opbr_next, bytes((char,)))
@@ -860,8 +869,10 @@ class Terminal:
                 raise ValueError("feed esc [ %r H" % parts)
             self.screen.move(*map((-1).__add__, map(int, parts)))
         elif prev == b'2' and char == ord(b'J'):
+            y, x = self.screen.getyx()
             self.screen.move(0, 0)
             self.screen.clrtobot()
+            self.screen.move(y, x)  # clearing does not move the cursor
         elif prev == b'3' and char == ord(b'J'):
             pass  # erase the scrollback: there is none
         elif prev == b'0' and char == ord(b'J'):
