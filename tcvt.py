@@ -284,39 +284,12 @@ class Columns:
 def acs_map():
     """call after curses.initscr"""
     # can this mapping be obtained from curses?
-    return {
-        ord(b'l'): curses.ACS_ULCORNER,
-        ord(b'm'): curses.ACS_LLCORNER,
-        ord(b'k'): curses.ACS_URCORNER,
-        ord(b'j'): curses.ACS_LRCORNER,
-        ord(b't'): curses.ACS_LTEE,
-        ord(b'u'): curses.ACS_RTEE,
-        ord(b'v'): curses.ACS_BTEE,
-        ord(b'w'): curses.ACS_TTEE,
-        ord(b'q'): curses.ACS_HLINE,
-        ord(b'x'): curses.ACS_VLINE,
-        ord(b'n'): curses.ACS_PLUS,
-        ord(b'o'): curses.ACS_S1,
-        ord(b's'): curses.ACS_S9,
-        ord(b'`'): curses.ACS_DIAMOND,
-        ord(b'a'): curses.ACS_CKBOARD,
-        ord(b'f'): curses.ACS_DEGREE,
-        ord(b'g'): curses.ACS_PLMINUS,
-        ord(b'~'): curses.ACS_BULLET,
-        ord(b','): curses.ACS_LARROW,
-        ord(b'+'): curses.ACS_RARROW,
-        ord(b'.'): curses.ACS_DARROW,
-        ord(b'-'): curses.ACS_UARROW,
-        ord(b'h'): curses.ACS_BOARD,
-        ord(b'i'): curses.ACS_LANTERN,
-        ord(b'p'): curses.ACS_S3,
-        ord(b'r'): curses.ACS_S7,
-        ord(b'y'): curses.ACS_LEQUAL,
-        ord(b'z'): curses.ACS_GEQUAL,
-        ord(b'{'): curses.ACS_PI,
-        ord(b'|'): curses.ACS_NEQUAL,
-        ord(b'}'): curses.ACS_STERLING,
-    }
+    table = (b"l:ULCORNER m:LLCORNER k:URCORNER j:LRCORNER t:LTEE u:RTEE v:BTEE w:TTEE "
+             b"q:HLINE x:VLINE n:PLUS o:S1 s:S9 `:DIAMOND a:CKBOARD f:DEGREE g:PLMINUS "
+             b"~:BULLET ,:LARROW +:RARROW .:DARROW -:UARROW h:BOARD i:LANTERN p:S3 r:S7 "
+             b"y:LEQUAL z:GEQUAL {:PI |:NEQUAL }:STERLING")
+    return {item[0]: getattr(curses, "ACS_" + item[2:].decode())
+            for item in table.split()}
 
 def compose_dicts(dct1, dct2):
     result = {}
