@@ -79,6 +79,7 @@ class Simple:
     def __init__(self, curseswindow):
         self.screen = curseswindow
         self.screen.scrollok(1)
+        self.pending = False  # a character filled the last column; the wrap waits for the next one
 
     def getmaxyx(self):
         return self.screen.getmaxyx()
@@ -89,13 +90,22 @@ class Simple:
     def move(self, ypos, xpos):
         ym, xm = self.getmaxyx()
         self.screen.move(max(0, min(ym - 1, ypos)), max(0, min(xm - 1, xpos)))
+        self.pending = False
 
     def relmove(self, yoff, xoff):
         y, x = self.getyx()
         self.move(y + yoff, x + xoff)
 
     def addch(self, char):
-        self.screen.addch(char)
+        y, x = self.getyx()
+        if x == self.getmaxyx()[1] - 1:  # insch() does not advance, so no curses auto-wrap
+            if isinstance(char, str):
+                self.screen.insstr(y, x, char)
+            else:
+                self.screen.insch(y, x, char)
+            self.pending = True
+        else:
+            self.screen.addch(char)
 
     def refresh(self):
         self.screen.refresh()
@@ -159,6 +169,7 @@ class Columns:
             self.windows.reverse()
         self.reverse = reverse
         self.ypos, self.xpos = 0, 0
+        self.pending = False  # a character filled the last column; the wrap waits for the next one
         for i in range(1, numcolumns):
             self.screen.vline(0, i * (self.columnwidth + 1) - 1,
                               curses.ACS_VLINE, self.height)
@@ -192,6 +203,7 @@ class Columns:
         height, width = self.getmaxyx()
         self.ypos = max(0, min(height - 1, ypos))
         self.xpos = max(0, min(width - 1, xpos))
+        self.pending = False
         self.fix_cursor()
 
     def fix_cursor(self):
@@ -207,11 +219,7 @@ class Columns:
                 self.curwin.insstr(self.curypos, self.curxpos, char, self.attrs)
             else:
                 self.curwin.insch(self.curypos, self.curxpos, char, self.attrs)
-            if self.ypos + 1 == 2 * self.height:
-                self.scroll()
-                self.move(self.ypos, 0)
-            else:
-                self.move(self.ypos + 1, 0)
+            self.pending = True
         else:
             self.curwin.addch(self.curypos, self.curxpos, char, self.attrs)
             self.xpos += 1
@@ -369,6 +377,9 @@ class Terminal:
 
     def addch(self, char):
         self.lastchar = char
+        if self.screen.pending:  # xterm wraps only when the next character arrives
+            self.do_cr()
+            self.do_ind()
         self.screen.addch(char)
 
     def start(self):
@@ -842,7 +853,7 @@ class Terminal:
             self.do_vpa(int(prev) - 1)
         elif char == ord(b'b') and prev.isdigit():
             for _ in range(int(prev)):
-                self.screen.addch(self.lastchar)
+                self.addch(self.lastchar)
         elif char == ord(b'G') and prev.isdigit():
             self.do_hpa(int(prev) - 1)
         elif char == ord(b'K') and prev == b'1':
