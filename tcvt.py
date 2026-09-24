@@ -799,6 +799,10 @@ class Terminal:
         elif prev == bytearray(b'2') and char == ord(b'J'):
             self.screen.move(0, 0)
             self.screen.clrtobot()
+        elif prev == bytearray(b'3') and char == ord(b'J'):
+            pass  # erase the scrollback: there is none
+        elif prev == bytearray(b'0') and char == ord(b'J'):
+            self.do_ed()
         elif char == ord(b'd') and prev.isdigit():
             self.do_vpa(int(prev) - 1)
         elif char == ord(b'b') and prev.isdigit():
