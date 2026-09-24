@@ -9,6 +9,9 @@ install:build
 	install -m755 optcvt.sh.transformed "${DESTDIR}${BINDIR}/optcvt"
 	install -m644 tcvt.1.gz "${DESTDIR}${MANDIR}/man1/tcvt.1.gz"
 	ln -sf tcvt.1.gz "${DESTDIR}${MANDIR}/man1/optcvt.1.gz"
+uninstall:
+	rm -f "${DESTDIR}${BINDIR}/tcvt" "${DESTDIR}${BINDIR}/optcvt"
+	rm -f "${DESTDIR}${MANDIR}/man1/tcvt.1.gz" "${DESTDIR}${MANDIR}/man1/optcvt.1.gz"
 build:optcvt.sh.transformed tcvt.1.gz
 clean:
 	rm -f optcvt.sh.transformed tcvt.1.gz
@@ -19,4 +22,4 @@ optcvt.sh.transformed:optcvt.sh
 %.gz:%
 	gzip -9 < $< > $@
 
-.PHONY:build install clean
+.PHONY:build install uninstall clean
