@@ -315,8 +315,8 @@ def compose_dicts(dct1, dct2):
     return result
 
 # DEC private modes passed through to the outer terminal: mouse click, drag,
-# motion and SGR encoding, focus events
-PASSTHROUGH_MODES = (b'1000', b'1002', b'1003', b'1006', b'1004')
+# motion and SGR encoding, focus events, bracketed paste
+PASSTHROUGH_MODES = (b'1000', b'1002', b'1003', b'1006', b'1004', b'2004')
 MOUSE_REPORT = re.compile(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])')
 MOUSE_PARTIAL = re.compile(rb'\x1b\[<[\d;]*$')
 
