@@ -506,6 +506,12 @@ class Terminal:
         for _ in range(x):
             self.screen.addch(ord(b' '))
 
+    def do_el2(self):
+        y, x = self.screen.getyx()
+        self.screen.move(y, 0)
+        self.screen.clrtoeol()
+        self.screen.move(y, x)
+
     def do_home(self):
         self.screen.move(0, 0)
 
@@ -802,6 +808,10 @@ class Terminal:
             self.do_hpa(int(prev) - 1)
         elif char == ord(b'K') and prev == b'1':
             self.do_el1()
+        elif char == ord(b'K') and prev == b'2':
+            self.do_el2()
+        elif char == ord(b'K') and prev == b'0':
+            self.do_el()
         elif char == ord(b'c'):
             self.do_da1()
         elif char == ord(b'n'):
