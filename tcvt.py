@@ -43,6 +43,7 @@ import time
 import optparse
 import codecs
 import locale
+import re
 
 def init_color_pairs(invert):
     """
@@ -81,6 +82,9 @@ class Simple:
 
     def getmaxyx(self):
         return self.screen.getmaxyx()
+
+    def virtual_pos(self, x, y):
+        return (y, x)
 
     def move(self, ypos, xpos):
         ym, xm = self.getmaxyx()
@@ -153,6 +157,7 @@ class Columns:
             self.windows.append(window)
         if reverse:
             self.windows.reverse()
+        self.reverse = reverse
         self.ypos, self.xpos = 0, 0
         for i in range(1, numcolumns):
             self.screen.vline(0, i * (self.columnwidth + 1) - 1,
@@ -173,6 +178,15 @@ class Columns:
 
     def getmaxyx(self):
         return (self.height * self.numcolumns, self.columnwidth)
+
+    def virtual_pos(self, x, y):
+        """Map a 0-based outer position to (row, col) on the tall screen; None on a separator."""
+        pane, x = divmod(x, self.columnwidth + 1)
+        if x == self.columnwidth or pane >= self.numcolumns:
+            return None
+        if self.reverse:
+            pane = self.numcolumns - 1 - pane
+        return (pane * self.height + y, x)
 
     def move(self, ypos, xpos):
         height, width = self.getmaxyx()
@@ -300,6 +314,10 @@ def compose_dicts(dct1, dct2):
             pass
     return result
 
+MOUSE_MODES = (b'1000', b'1002', b'1003', b'1006')  # click, drag, motion, SGR encoding
+MOUSE_REPORT = re.compile(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])')
+MOUSE_PARTIAL = re.compile(rb'\x1b\[<[\d;]*$')
+
 SIMPLE_CHARACTERS = (
     b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' +
     b'0123456789@:~$ .#!/_(),[]=-+*\'"|<>%&\\?;`^{}')
@@ -317,6 +335,7 @@ class Terminal:
         self.saved = (0, 0)  # ponytail: DECSC/DECRC keep the cursor only, not SGR
         self.region = None  # DECSTBM scrolling region (top, bottom), 0-based; None: whole screen
         self.colors = {}  # (r, g, b) -> curses color slot 16..COLORS-1
+        self.mouse_modes = set()  # DEC mouse modes the child enabled, passed to the outer terminal
         self.pairs = {}  # (fg, bg) -> color pair 128..255 for colors outside the table
         self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
         self.columns = columns
@@ -364,6 +383,8 @@ class Terminal:
         self.graphics_chars = compose_dicts(self.graphics_chars, acs_map())
 
     def stop(self):
+        for mode in list(self.mouse_modes):
+            self.set_mouse_mode(mode, False)
         if self.colors:  # ncurses does not always reset the palette itself
             sys.stdout.write("\x1b]104\x07")
             sys.stdout.flush()
@@ -607,6 +628,33 @@ class Terminal:
     def do_rin(self, n):
         self.scroll_region(-(n or 1))
 
+    def set_mouse_mode(self, mode, on):
+        """Pass a mouse mode through to the outer terminal; SGR reports (1006) are always used."""
+        if on:
+            self.mouse_modes.add(mode)
+        else:
+            self.mouse_modes.discard(mode)
+        tracking = self.mouse_modes & {1000, 1002, 1003}
+        out = "" if mode == 1006 else "\x1b[?%d%s" % (mode, "h" if on else "l")
+        out += "\x1b[?1006h" if tracking else "\x1b[?1006l"
+        sys.stdout.write(out)
+        sys.stdout.flush()
+
+    def translate_mouse(self, data):
+        """Remap SGR mouse reports in keyboard input to the child's screen and encoding."""
+        def remap(match):
+            button, x, y = (int(g) for g in match.groups()[:3])
+            pos = self.screen.virtual_pos(x - 1, y - 1)
+            if pos is None:
+                return b''  # on a separator
+            y, x = pos[0] + 1, pos[1] + 1
+            if 1006 in self.mouse_modes:
+                return b'\x1b[<%d;%d;%d%s' % (button, x, y, match.group(4))
+            if match.group(4) == b'm':  # X10 encodes a release as button 3
+                button |= 3
+            return b'\x1b[M' + bytes((32 + button, 32 + min(x, 223), 32 + min(y, 223)))
+        return MOUSE_REPORT.sub(remap, data)
+
     def do_sc(self):
         self.saved = self.screen.getyx()
 
@@ -666,16 +714,23 @@ class Terminal:
         elif char in b'0123456789':
             self.mode = (self.feed_esc_opbr_next, bytes((char,)))
         elif char in b'?>=<':
-            self.mode = (self.feed_esc_private,)
+            self.mode = (self.feed_esc_private, char, b'')
         elif char == ord(b'r'):
             self.do_csr(0, 0)
         else:
             raise ValueError("feed esc [ %r" % char)
 
-    def feed_esc_private(self, char):
-        # ponytail: DEC private modes and xterm queries (ESC [ ? 1049 h, ESC [ > 0 q) ignored
-        if char not in b'0123456789;':
-            self.feed_reset()
+    def feed_esc_private(self, char, prefix, params):
+        # ponytail: DEC private modes and xterm queries (ESC [ ? 1049 h, ESC [ > 0 q)
+        # are ignored, except the mouse modes, which are passed through
+        if char in b'0123456789;':
+            self.mode = (self.feed_esc_private, prefix, params + bytes((char,)))
+            return
+        self.feed_reset()
+        if prefix == ord(b'?') and char in b'hl':
+            for param in params.split(b';'):
+                if param in MOUSE_MODES:
+                    self.set_mouse_mode(int(param), char == ord(b'h'))
 
     def feed_color(self, code):
         func = {
@@ -894,6 +949,7 @@ def main():
         signal.signal(signal.SIGWINCH, on_winch)  # replaces the ncurses handler
         t.resizepty(masterfd)
         refreshpending = None
+        raw = b''  # keyboard bytes not yet sent to the child
         while True:
             res, _, _ = select.select([0, masterfd, winchr], [], [],
                                       refreshpending and 0)
@@ -906,6 +962,13 @@ def main():
             elif 0 in res:
                 while True:
                     key = t.realscreen.getch()
+                    if 0 <= key <= 0xff and key not in keymapping and key != 0xb3:
+                        raw += bytes((key,))
+                        continue
+                    if raw:
+                        cut = MOUSE_PARTIAL.search(raw)  # report torn, keep its start
+                        os.write(masterfd, t.translate_mouse(raw[:cut.start()] if cut else raw))
+                        raw = raw[cut.start():] if cut else b''
                     if key == -1:
                         break
                     if key == 0xb3:
@@ -913,11 +976,8 @@ def main():
                         t.resizepty(masterfd)
                     elif key in keymapping:
                         os.write(masterfd, keymapping[key])
-                    elif key <= 0xff:
-                        os.write(masterfd, struct.pack("B", key))
-                    else:
-                        if "TCVT_DEVEL" in os.environ:
-                            raise ValueError("getch returned %d" % key)
+                    elif "TCVT_DEVEL" in os.environ:
+                        raise ValueError("getch returned %d" % key)
             elif masterfd in res:
                 try:
                     data = os.read(masterfd, 1024)
