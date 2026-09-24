@@ -314,7 +314,9 @@ def compose_dicts(dct1, dct2):
             pass
     return result
 
-MOUSE_MODES = (b'1000', b'1002', b'1003', b'1006')  # click, drag, motion, SGR encoding
+# DEC private modes passed through to the outer terminal: mouse click, drag,
+# motion and SGR encoding, focus events
+PASSTHROUGH_MODES = (b'1000', b'1002', b'1003', b'1006', b'1004')
 MOUSE_REPORT = re.compile(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])')
 MOUSE_PARTIAL = re.compile(rb'\x1b\[<[\d;]*$')
 
@@ -335,7 +337,7 @@ class Terminal:
         self.saved = (0, 0)  # ponytail: DECSC/DECRC keep the cursor only, not SGR
         self.region = None  # DECSTBM scrolling region (top, bottom), 0-based; None: whole screen
         self.colors = {}  # (r, g, b) -> curses color slot 16..COLORS-1
-        self.mouse_modes = set()  # DEC mouse modes the child enabled, passed to the outer terminal
+        self.outer_modes = set()  # DEC private modes the child enabled, passed to the outer terminal
         self.pairs = {}  # (fg, bg) -> color pair 128..255 for colors outside the table
         self.utf8 = codecs.getincrementaldecoder('utf-8')('replace')
         self.columns = columns
@@ -383,8 +385,8 @@ class Terminal:
         self.graphics_chars = compose_dicts(self.graphics_chars, acs_map())
 
     def stop(self):
-        for mode in list(self.mouse_modes):
-            self.set_mouse_mode(mode, False)
+        for mode in list(self.outer_modes):
+            self.set_outer_mode(mode, False)
         if self.colors:  # ncurses does not always reset the palette itself
             sys.stdout.write("\x1b]104\x07")
             sys.stdout.flush()
@@ -628,15 +630,16 @@ class Terminal:
     def do_rin(self, n):
         self.scroll_region(-(n or 1))
 
-    def set_mouse_mode(self, mode, on):
-        """Pass a mouse mode through to the outer terminal; SGR reports (1006) are always used."""
+    def set_outer_mode(self, mode, on):
+        """Pass a DEC private mode through to the outer terminal; mouse tracking always with SGR (1006)."""
         if on:
-            self.mouse_modes.add(mode)
+            self.outer_modes.add(mode)
         else:
-            self.mouse_modes.discard(mode)
-        tracking = self.mouse_modes & {1000, 1002, 1003}
+            self.outer_modes.discard(mode)
         out = "" if mode == 1006 else "\x1b[?%d%s" % (mode, "h" if on else "l")
-        out += "\x1b[?1006h" if tracking else "\x1b[?1006l"
+        if mode in (1000, 1002, 1003, 1006):
+            tracking = self.outer_modes & {1000, 1002, 1003}
+            out += "\x1b[?1006h" if tracking else "\x1b[?1006l"
         sys.stdout.write(out)
         sys.stdout.flush()
 
@@ -648,7 +651,7 @@ class Terminal:
             if pos is None:
                 return b''  # on a separator
             y, x = pos[0] + 1, pos[1] + 1
-            if 1006 in self.mouse_modes:
+            if 1006 in self.outer_modes:
                 return b'\x1b[<%d;%d;%d%s' % (button, x, y, match.group(4))
             if match.group(4) == b'm':  # X10 encodes a release as button 3
                 button |= 3
@@ -729,8 +732,8 @@ class Terminal:
         self.feed_reset()
         if prefix == ord(b'?') and char in b'hl':
             for param in params.split(b';'):
-                if param in MOUSE_MODES:
-                    self.set_mouse_mode(int(param), char == ord(b'h'))
+                if param in PASSTHROUGH_MODES:
+                    self.set_outer_mode(int(param), char == ord(b'h'))
 
     def feed_color(self, code):
         func = {
