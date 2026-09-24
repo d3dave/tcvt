@@ -544,13 +544,27 @@ class Terminal:
         self.do_il(1)
 
     def do_ind(self):
-        y, _ = self.screen.getyx()
-        ym, _ = self.screen.getmaxyx()
-        if y + 1 == ym:
-            self.screen.scroll()
-            self.screen.move(y, 0)
-        else:
-            self.screen.move(y+1, 0)
+        """Index: down one row, same column; on the region's bottom row scroll it instead."""
+        y, x = self.screen.getyx()
+        rows, _ = self.screen.getmaxyx()
+        bottom = self.region[1] if self.region else rows - 1
+        if y == bottom:
+            self.scroll_region(1)
+        elif y + 1 < rows:
+            self.screen.move(y + 1, x)
+
+    def do_ri(self):
+        """Reverse index: up one row; on the region's top row scroll it down instead."""
+        y, x = self.screen.getyx()
+        top = self.region[0] if self.region else 0
+        if y == top:
+            self.scroll_region(-1)
+        elif y > 0:
+            self.screen.move(y - 1, x)
+
+    def do_nel(self):
+        self.do_cr()
+        self.do_ind()
 
     def do_invis(self):
         self.screen.attron(curses.A_INVIS)
@@ -686,6 +700,9 @@ class Terminal:
         func = {
             ord('7'): self.do_sc,
             ord('8'): self.do_rc,
+            ord('D'): self.do_ind,
+            ord('E'): self.do_nel,
+            ord('M'): self.do_ri,
             }.get(char)
         if func:
             self.feed_reset()
